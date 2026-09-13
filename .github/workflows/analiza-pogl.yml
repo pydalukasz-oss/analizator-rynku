@@ -1,0 +1,52 @@
+name: Analiza pogłębiona (backfill + backtest + ryzyko)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ticker do kalkulatora ryzyka (np. CDR, AAPL, BITCOIN)"
+        required: true
+        default: "CDR"
+      amount:
+        description: "Kwota inwestycji do kalkulatora ryzyka (np. 5000)"
+        required: true
+        default: "5000"
+      days:
+        description: "Horyzont czasowy w dniach dla kalkulatora ryzyka"
+        required: true
+        default: "30"
+
+jobs:
+  deep-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v4
+
+      - name: Ustaw Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Zainstaluj zależności
+        run: pip install -r requirements.txt
+
+      - name: Doładuj ok. 2 lata historii (backfill)
+        run: python backfill.py
+
+      - name: Uruchom backtest
+        run: python run_backtest.py
+
+      - name: Uruchom kalkulator scenariuszy ryzyka
+        run: >
+          python risk_calculator.py
+          --ticker "${{ github.event.inputs.ticker }}"
+          --amount "${{ github.event.inputs.amount }}"
+          --days "${{ github.event.inputs.days }}"
+
+      - name: Zapisz bazę danych jako artefakt (do pobrania)
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-db-backfilled
+          path: market_data.db
+          retention-days: 90
