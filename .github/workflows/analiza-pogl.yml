@@ -19,6 +19,8 @@ on:
 jobs:
   deep-analysis:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Pobierz kod
         uses: actions/checkout@v4
@@ -50,3 +52,12 @@ jobs:
           name: market-data-db-backfilled
           path: market_data.db
           retention-days: 90
+
+      - name: Wygeneruj stronę z wykresami
+        run: python generate_report.py
+
+      - name: Opublikuj na GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
