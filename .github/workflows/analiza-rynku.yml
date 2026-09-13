@@ -1,0 +1,37 @@
+name: Analiza rynku
+
+on:
+  schedule:
+    # Uruchamia się co godzinę, w dni robocze, 8:00-17:00 UTC
+    # (pokrywa sesję GPW 9:00-17:00 i częściowo US premarket/otwarcie)
+    - cron: "0 8-17 * * 1-5"
+  workflow_dispatch: {}  # pozwala też odpalić ręcznie z zakładki Actions
+
+jobs:
+  run-analyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v4
+
+      - name: Ustaw Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Zainstaluj zależności
+        run: pip install -r requirements.txt
+
+      - name: Uruchom analizator
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: python main.py
+
+      - name: Zapisz bazę danych jako artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-db
+          path: market_data.db
+          retention-days: 90
