@@ -1,12 +1,11 @@
 """
-Generuje statyczną stronę HTML (docs/index.html) z wykresami, wyjaśnieniami,
-tabelą backtestu i interaktywnym kalkulatorem scenariuszy ryzyka —
-do publikacji przez GitHub Pages.
+Generuje statyczną stronę HTML (docs/index.html) z wykresami, szczegółowymi
+wyjaśnieniami metodologii, tabelą backtestu i interaktywnym kalkulatorem
+scenariuszy ryzyka — do publikacji przez GitHub Pages.
 
 To NIE jest działająca aplikacja/serwer jak Streamlit — to zwykła strona
 internetowa. Kalkulator ryzyka liczy w przeglądarce (JavaScript), na
-danych historycznych wbudowanych w stronę przy generowaniu — nie potrzeba
-żadnego backendu ani hostingu poza GitHub Pages.
+danych historycznych wbudowanych w stronę przy generowaniu.
 
 Użycie:
     python generate_report.py
@@ -67,19 +66,44 @@ def build_chart_html(ticker: str, market: str, enriched: pd.DataFrame) -> str:
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
-def signal_explanation(signal_type: str) -> str:
-    return {
-        "SMA_CROSS_UP": "krótsza średnia krocząca przebiła dłuższą od dołu — "
-                        "historycznie bywa to interpretowane jako sygnał wzrostowy.",
-        "SMA_CROSS_DOWN": "krótsza średnia krocząca przebiła dłuższą od góry — "
-                           "historycznie bywa to interpretowane jako sygnał spadkowy.",
-        "RSI_OVERSOLD": "wskaźnik RSI jest bardzo nisko — instrument bywa uznawany "
-                         "za \"wyprzedany\", co czasem poprzedza odbicie (ale nie zawsze).",
-        "RSI_OVERBOUGHT": "wskaźnik RSI jest bardzo wysoko — instrument bywa uznawany "
-                           "za \"wykupiony\", co czasem poprzedza korektę (ale nie zawsze).",
-        "VOLUME_SPIKE": "wolumen obrotu jest znacznie wyższy niż zwykle — oznacza "
-                         "wzmożone zainteresowanie inwestorów, w dowolnym kierunku.",
-    }.get(signal_type, "")
+SIGNAL_EXPLANATIONS = {
+    "SMA_CROSS_UP": (
+        "SMA (Simple Moving Average) to średnia cena zamknięcia z ostatnich N dni. "
+        f"Mamy dwie: krótką (SMA{config.SMA_SHORT}, ostatnie {config.SMA_SHORT} dni) i długą "
+        f"(SMA{config.SMA_LONG}, ostatnie {config.SMA_LONG} dni). Ten sygnał pojawia się, gdy "
+        "krótka średnia PRZEBIJA długą OD DOŁU — czyli krótkoterminowa cena zaczyna rosnąć "
+        "szybciej niż długoterminowy trend. Przykład: jeśli SMA20 wynosi 105 zł, a SMA50 wynosi "
+        "103 zł, i wcześniej było odwrotnie — to jest właśnie ten sygnał. Bywa interpretowany "
+        "jako początek trendu wzrostowego, ale to tylko wzorzec statystyczny, nie gwarancja."
+    ),
+    "SMA_CROSS_DOWN": (
+        "To samo co wyżej, tylko w drugą stronę: krótka średnia (SMA{}) przebija długą "
+        "(SMA{}) OD GÓRY, czyli krótkoterminowa cena zaczyna spadać szybciej niż długoterminowy "
+        "trend. Bywa interpretowany jako początek trendu spadkowego."
+    ).format(config.SMA_SHORT, config.SMA_LONG),
+    "RSI_OVERSOLD": (
+        f"RSI (Relative Strength Index) to wskaźnik od 0 do 100, liczony ze stosunku "
+        f"średnich wzrostów do średnich spadków ceny z ostatnich {config.RSI_PERIOD} dni. "
+        f"Poniżej {config.RSI_OVERSOLD} uznaje się instrument za \"wyprzedany\" — cena spadała "
+        "ostatnio silnie i szybko. Przykład: RSI=25 oznacza, że w ostatnich dniach dominowały "
+        "duże spadki nad wzrostami. Czasem poprzedza to odbicie (bo \"za dużo\" sprzedających), "
+        "ale równie dobrze cena może dalej spadać — RSI nie zna przyszłości, tylko opisuje "
+        "niedawną przeszłość."
+    ),
+    "RSI_OVERBOUGHT": (
+        f"To samo co wyżej, tylko odwrotnie: RSI powyżej {config.RSI_OVERBOUGHT} oznacza "
+        "instrument \"wykupiony\" — cena rosła ostatnio silnie i szybko. Czasem poprzedza to "
+        "korektę, ale nie zawsze — silny trend wzrostowy potrafi utrzymywać wysokie RSI "
+        "tygodniami."
+    ),
+    "VOLUME_SPIKE": (
+        f"Wolumen to liczba akcji/jednostek, które zmieniły właściciela danego dnia. Ten "
+        f"sygnał pojawia się, gdy dzienny wolumen jest ponad {config.VOLUME_SPIKE_MULTIPLIER}x "
+        "wyższy niż średnia z ostatnich 20 dni. Oznacza to nietypowo duże zainteresowanie "
+        "instrumentem — może to być reakcja na wiadomość, wynik finansowy, albo coś innego. "
+        "Kierunek (wzrost czy spadek) nie jest tu określony, tylko sama intensywność obrotu."
+    ),
+}
 
 
 def main():
@@ -88,7 +112,7 @@ def main():
 
     charts_html = []
     all_signals = []
-    price_data = {}  # do kalkulatora ryzyka w JS: {ticker: {dates, closes, market}}
+    price_data = {}
 
     for (market, ticker), group in raw.groupby(["market", "ticker"]):
         enriched = add_indicators(group)
@@ -101,11 +125,19 @@ def main():
             "closes": group["close"].round(4).tolist(),
         }
 
-    signals_html = "".join(
-        f"<li><b>[{s['type']}]</b> {s['message']}<br>"
-        f"<span class='explain'>{signal_explanation(s['type'])}</span></li>"
-        for s in all_signals
-    ) or "<li>Brak aktywnych sygnałów w tej chwili.</li>"
+    if all_signals:
+        signals_html = "".join(
+            f"<li><b>[{s['type']}] {s['ticker']} ({s['market']})</b><br>"
+            f"<span class='msg'>{s['message']}</span><br>"
+            f"<span class='explain'>{SIGNAL_EXPLANATIONS.get(s['type'], '')}</span></li>"
+            for s in all_signals
+        )
+    else:
+        signals_html = (
+            "<li>Brak aktywnych sygnałów w tej chwili. To normalne — sygnały pojawiają się "
+            "tylko gdy cena/wolumen zachowują się nietypowo względem swojej niedawnej historii, "
+            "co nie zdarza się codziennie dla każdego instrumentu.</li>"
+        )
 
     # --- Backtest ---
     bt = backtest_all(raw, max_hold_days=30)
@@ -117,6 +149,8 @@ def main():
         f"<td>{r.buy_hold_return_pct if pd.notna(r.buy_hold_return_pct) else '—'}</td></tr>"
         for r in bt.itertuples()
     )
+    beat_market = int((bt["total_return_pct"] > bt["buy_hold_return_pct"]).sum())
+    total_with_trades = int((bt["n_trades"] > 0).sum())
 
     ticker_options = "".join(f'<option value="{t}">{t} ({d["market"]})</option>' for t, d in price_data.items())
     price_data_json = json.dumps(price_data)
@@ -130,13 +164,16 @@ def main():
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
   body {{ background: #0e1117; color: #eee; font-family: system-ui, sans-serif;
-         max-width: 1000px; margin: 0 auto; padding: 20px; line-height: 1.5; }}
-  h1 {{ font-size: 1.7em; }}
-  h2 {{ font-size: 1.3em; margin-top: 2.2em; border-top: 1px solid #333; padding-top: 1em; }}
+         max-width: 1000px; margin: 0 auto; padding: 20px; line-height: 1.6; }}
+  h1 {{ font-size: 1.8em; }}
+  h2 {{ font-size: 1.35em; margin-top: 2.5em; border-top: 1px solid #333; padding-top: 1em; }}
+  h3 {{ font-size: 1.1em; margin-top: 1.5em; color: #ccc; }}
   p.lead {{ color: #bbb; }}
-  ul {{ background: #1a1d24; padding: 16px 24px; border-radius: 8px; list-style: none; }}
-  ul li {{ margin-bottom: 12px; }}
-  .explain {{ color: #999; font-size: 0.9em; }}
+  ul {{ background: #1a1d24; padding: 18px 24px; border-radius: 8px; list-style: none; }}
+  ul li {{ margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #2a2d34; }}
+  ul li:last-child {{ border-bottom: none; margin-bottom: 0; }}
+  .msg {{ color: #ddd; }}
+  .explain {{ color: #999; font-size: 0.88em; display: block; margin-top: 6px; }}
   .updated {{ color: #888; font-size: 0.85em; margin-bottom: 24px; }}
   table {{ width: 100%; border-collapse: collapse; background: #1a1d24; border-radius: 8px; overflow: hidden; }}
   th, td {{ padding: 10px 14px; text-align: right; border-bottom: 1px solid #2a2d34; }}
@@ -160,6 +197,8 @@ def main():
   .scenario .label {{ color: #aaa; font-size: 0.85em; }}
   .disclaimer {{ background: #2a1f0e; border: 1px solid #5a3d0e; padding: 14px 18px;
                 border-radius: 8px; color: #d9b878; font-size: 0.9em; margin-top: 16px; }}
+  .example {{ background: #16261b; border: 1px solid #2e5138; padding: 14px 18px;
+             border-radius: 8px; font-size: 0.92em; margin-top: 12px; }}
   code {{ background: #22252c; padding: 2px 6px; border-radius: 4px; }}
 </style>
 </head>
@@ -170,41 +209,104 @@ def main():
 wskaźniki techniczne, backtest strategii i kalkulator scenariuszy ryzyka.</p>
 <p class="updated">Dane aktualizowane automatycznie przy każdym uruchomieniu workflow w GitHub Actions.</p>
 
-<h2>Co tu widzisz — krótkie wyjaśnienie</h2>
+<h2>1. Co tu w ogóle jest i skąd się bierze</h2>
 <p>
-Ta strona pokazuje trzy rzeczy: (1) <b>aktualne sygnały techniczne</b> —
-wzorce w cenie i wolumenie, które mogą (ale nie muszą) coś zapowiadać;
-(2) <b>wyniki backtestu</b> — jak te same sygnały radziły sobie historycznie
-w porównaniu do zwykłego kupienia i trzymania; (3) <b>kalkulator ryzyka</b> —
-jaki rozrzut wyników historycznie dawała inwestycja danej kwoty na dany okres.
-Żadna z tych rzeczy nie jest prognozą przyszłości — to statystyka przeszłości.
+Ta strona składa się z czterech części, w tej kolejności: <b>aktualne sygnały</b>
+(co dzieje się teraz), <b>backtest</b> (czy te sygnały historycznie się sprawdzały),
+<b>kalkulator ryzyka</b> (jaki rozrzut wyników dawała inwestycja w przeszłości) i
+<b>wykresy</b> (surowe dane, żebyś mógł zweryfikować wszystko sam).
+Dane pochodzą z trzech darmowych źródeł: GPW ze Stooq, rynki USA z Yahoo Finance,
+krypto (opcjonalnie) z CoinGecko. Wszystko liczone jest automatycznie, bez
+ingerencji człowieka — więc traktuj to jako punkt wyjścia do własnej analizy,
+nie gotową odpowiedź.
 </p>
 
-<h2>Aktualne sygnały</h2>
+<h2>2. Jak czytać wskaźniki techniczne</h2>
+<h3>Średnie kroczące (SMA)</h3>
+<p>
+SMA{config.SMA_SHORT} to średnia cena zamknięcia z ostatnich {config.SMA_SHORT} dni,
+SMA{config.SMA_LONG} — z ostatnich {config.SMA_LONG} dni. Krótsza średnia reaguje
+szybciej na zmiany ceny, dłuższa wolniej. Kiedy się przecinają, traderzy technicy
+uznają to za potencjalną zmianę trendu.
+</p>
+<div class="example">
+<b>Przykład liczbowy:</b> jeśli ceny zamknięcia z ostatnich 5 dni to 100, 102, 101, 103, 104 zł,
+to SMA5 = (100+102+101+103+104)/5 = 102 zł. To po prostu średnia arytmetyczna — nic bardziej
+skomplikowanego.
+</div>
+
+<h3>RSI (Relative Strength Index)</h3>
+<p>
+Liczba od 0 do 100 opisująca, czy w ostatnich {config.RSI_PERIOD} dniach dominowały
+wzrosty czy spadki ceny, i jak silnie. RSI blisko 100 = same silne wzrosty (rynek
+"rozgrzany"), RSI blisko 0 = same silne spadki (rynek "wyprzedany"). Próg
+{config.RSI_OVERSOLD} i {config.RSI_OVERBOUGHT} to umowne granice, po przekroczeniu
+których mówi się o "wyprzedaniu" i "wykupieniu".
+</p>
+
+<h3>Wolumen</h3>
+<p>
+Liczba jednostek (akcji, kontraktów) wymienionych danego dnia. Nagły skok wolumenu
+(u nas: ponad {config.VOLUME_SPIKE_MULTIPLIER}x średniej z 20 dni) oznacza, że
+"coś się dzieje" — wzmożone zainteresowanie, niezależnie od kierunku ceny.
+</p>
+
+<h2>3. Aktualne sygnały</h2>
+<p class="lead">
+Poniżej lista instrumentów, które WŁAŚNIE TERAZ (na dzień ostatniego uruchomienia)
+spełniają któryś z powyższych wzorców.
+</p>
 <ul>{signals_html}</ul>
 
-<h2>Backtest — czy sygnały historycznie biły rynek?</h2>
+<h2>4. Backtest — czy te sygnały historycznie biły rynek?</h2>
 <p class="lead">
-<b>win_rate</b> = odsetek zyskownych transakcji. <b>avg_return</b> = średni zwrot
-na transakcję. <b>total_return (strategia)</b> = złożony zwrot ze wszystkich
-transakcji sygnałowych. <b>buy_hold</b> = zwrot z samego kupienia i trzymania
-przez cały okres, dla porównania. Wysoki win_rate NIE oznacza dobrej strategii —
-strategia może wygrywać większość małych transakcji, a i tak przegrywać z rynkiem,
-jeśli zbyt wcześnie wychodzi z pozycji i przegapia duże ruchy (dokładnie to
-widać poniżej, jeśli total_return jest niższy niż buy_hold).
+Backtest symuluje: "gdybym kupował za każdym razem, gdy pojawia się sygnał wejścia
+(SMA_CROSS_UP lub RSI_OVERSOLD), i sprzedawał przy sygnale wyjścia (SMA_CROSS_DOWN,
+RSI_OVERBOUGHT, albo po 30 dniach jeśli nic się nie wydarzy) — jak by mi poszło
+w przeszłości?" To NIE uwzględnia prowizji maklerskich ani poślizgu cenowego —
+służy do wstępnej oceny, nie do dokładnej symulacji zysków.
 </p>
+<h3>Jak czytać kolumny</h3>
+<ul>
+<li><b>Transakcje</b> — ile razy strategia kupiła i sprzedała w dostępnej historii.</li>
+<li><b>Win rate %</b> — odsetek transakcji zakończonych na plusie. WAŻNE: wysoki win
+rate nie oznacza dobrej strategii, jeśli pojedyncze straty są duże a zyski małe.</li>
+<li><b>Śr. zwrot %</b> — średni wynik pojedynczej transakcji.</li>
+<li><b>Zwrot strategii %</b> — złożony (nie prosty) zwrot ze wszystkich transakcji
+razem, tak jakby każdy zysk/strata reinwestowały się w kolejną transakcję.</li>
+<li><b>Buy&amp;hold %</b> — dla porównania: ile dałoby zwykłe kupienie na początku
+dostępnej historii i trzymanie do końca, bez żadnych sygnałów.</li>
+</ul>
 <table>
 <tr><th>Ticker</th><th>Transakcje</th><th>Win rate %</th><th>Śr. zwrot %</th>
 <th>Zwrot strategii %</th><th>Buy&amp;hold %</th></tr>
 {bt_rows}
 </table>
+<div class="example">
+<b>Jak interpretować ten konkretny wynik:</b> strategia pobiła zwykłe kupienie-i-trzymanie
+na {beat_market} z {total_with_trades} instrumentów z aktywnymi transakcjami. Jeśli ta
+liczba jest niska (0 lub blisko zera) — oznacza to, że mechaniczne sygnały SMA/RSI
+w obecnej konfiguracji progów, na tych konkretnych instrumentach, w tym okresie,
+NIE dawały przewagi nad najprostszym możliwym podejściem (kup i trzymaj). To ważna,
+uczciwa informacja — nie każda strategia techniczna działa, nawet jeśli "brzmi dobrze".
+</div>
 
-<h2>Kalkulator scenariuszy ryzyka</h2>
+<h2>5. Kalkulator scenariuszy ryzyka</h2>
 <p class="lead">
-Wybierz instrument, kwotę i horyzont czasowy. Kalkulator przeliczy WSZYSTKIE
-historyczne okresy o takiej długości w zebranych danych i pokaże rozrzut
-wyników (nie jedną liczbę) — od najgorszego do najlepszego przypadku.
+Wybierz instrument, kwotę i horyzont czasowy (liczbę dni). Kalkulator przeszuka
+CAŁĄ dostępną historię cen tego instrumentu, znajdzie wszystkie okresy o wybranej
+długości (np. wszystkie możliwe 30-dniowe okna), policzy zwrot procentowy w każdym
+z nich, i pokaże Ci rozkład tych wyników — od najgorszego do najlepszego przypadku,
+zamiast jednej "prognozowanej" liczby.
 </p>
+<div class="example">
+<b>Przykład interpretacji:</b> jeśli dla kwoty 5000 zł i 30 dni kalkulator pokaże
+scenariusz "pesymistyczny: -10%" i "optymistyczny: +12%", to znaczy: w historycznych
+danych, spośród wszystkich możliwych 30-dniowych okresów, 25% z nich zakończyło się
+wynikiem gorszym niż -10%, a 25% lepszym niż +12%. To NIE są granice tego, co może
+się zdarzyć w przyszłości — mogą się zdarzyć wyniki jeszcze gorsze lub lepsze,
+zwłaszcza w nietypowych warunkach rynkowych (krach, hossa, nagła wiadomość o spółce).
+</div>
 <div class="calc-box">
   <label for="calc-ticker">Instrument</label>
   <select id="calc-ticker">{ticker_options}</select>
@@ -220,15 +322,34 @@ wyników (nie jedną liczbę) — od najgorszego do najlepszego przypadku.
   <div id="calc-results"></div>
 </div>
 <div class="disclaimer">
-⚠️ To nie jest prognoza ani porada inwestycyjna. Pokazuje wyłącznie rozkład
-tego, co historycznie się zdarzało w podobnych oknach czasowych — przyszłość
-może wyglądać inaczej, szczególnie przy kryzysie rynkowym lub istotnej
-zmianie sytuacji spółki. Inwestuj tylko środki, których utratę możesz
-przetrwać bez problemu.
+⚠️ <b>To nie jest prognoza ani porada inwestycyjna.</b> Pokazuje wyłącznie rozkład
+tego, co historycznie się zdarzało w podobnych oknach czasowych — przyszłość może
+wyglądać zupełnie inaczej, szczególnie przy kryzysie rynkowym, zmianie stóp
+procentowych, czy istotnej zmianie sytuacji samej spółki (np. wyniki finansowe,
+zmiana zarządu, skandal). Żadna analiza techniczna nie zna przyszłości. Inwestuj
+tylko środki, których utratę możesz przetrwać bez problemu, i rozważ konsultację
+z licencjonowanym doradcą finansowym przed podjęciem decyzji.
 </div>
 
-<h2>Wykresy</h2>
+<h2>6. Wykresy — surowe dane do własnej weryfikacji</h2>
+<p class="lead">
+Świece pokazują dzienne otwarcie/maksimum/minimum/zamknięcie. Linie to SMA{config.SMA_SHORT}
+i SMA{config.SMA_LONG}. Pod spodem RSI z zaznaczonymi progami {config.RSI_OVERSOLD} i
+{config.RSI_OVERBOUGHT}. Najedź kursorem na wykres, żeby zobaczyć dokładne wartości
+dla konkretnego dnia.
+</p>
 {"".join(charts_html)}
+
+<h2>7. Podsumowanie i uwagi końcowe</h2>
+<p class="lead">
+Ten dashboard to narzędzie analityczne, zbudowane na darmowych, publicznie dostępnych
+danych, z prostymi, mechanicznymi regułami sygnałowymi. Nie jest to system tradingowy
+gotowy do ślepego naśladowania — to punkt wyjścia do własnego myślenia. Warto traktować
+sygnały jako "coś się dzieje, sprawdź dlaczego", a nie "kup/sprzedaj teraz". Backtest
+pokazuje, że proste reguły SMA/RSI nie zawsze biją rynek — to normalne i oczekiwane,
+większość prostych strategii technicznych nie daje trwałej przewagi bez dodatkowego
+kontekstu (fundamenty spółki, sytuacja makroekonomiczna, zarządzanie ryzykiem pozycji).
+</p>
 
 <script>
 const PRICE_DATA = {price_data_json};
@@ -262,14 +383,14 @@ function runCalculator() {{
   const sorted = [...returns].sort((a, b) => a - b);
 
   const scenarios = [
-    {{p: 5, label: 'Bardzo pesymistyczny'}},
+    {{p: 5, label: 'Bardzo pesymistyczny (gorsze niż 95% historycznych przypadków)'}},
     {{p: 25, label: 'Pesymistyczny'}},
-    {{p: 50, label: 'Środkowy (mediana)'}},
+    {{p: 50, label: 'Środkowy (mediana historyczna)'}},
     {{p: 75, label: 'Optymistyczny'}},
-    {{p: 95, label: 'Bardzo optymistyczny'}},
+    {{p: 95, label: 'Bardzo optymistyczny (lepsze niż 95% historycznych przypadków)'}},
   ];
 
-  let html = `<p style="color:#888; font-size:0.85em;">Na podstawie ${{returns.length}} historycznych okresów ${{days}}-dniowych</p>`;
+  let html = `<p style="color:#888; font-size:0.85em;">Na podstawie ${{returns.length}} historycznych okresów ${{days}}-dniowych dla ${{ticker}}</p>`;
   for (const s of scenarios) {{
     const ret = percentile(sorted, s.p);
     const finalAmount = amount * (1 + ret);
@@ -288,13 +409,12 @@ function runCalculator() {{
   const lossCount = returns.filter(r => r < 0).length;
   const lossPct = (lossCount / returns.length * 100).toFixed(1);
   html += `<p style="color:#888; font-size:0.85em; margin-top:12px;">
-    Najgorszy historyczny wynik: ${{worst}}% &nbsp;|&nbsp; Najlepszy: ${{best}}% &nbsp;|&nbsp;
-    Odsetek okresów ze stratą: ${{lossPct}}%</p>`;
+    Najgorszy historyczny wynik w tym okresie: ${{worst}}% &nbsp;|&nbsp; Najlepszy: ${{best}}% &nbsp;|&nbsp;
+    Odsetek historycznych okresów ze stratą: ${{lossPct}}%</p>`;
 
   resultsDiv.innerHTML = html;
 }}
 
-// policz od razu dla domyślnych wartości
 window.addEventListener('DOMContentLoaded', runCalculator);
 </script>
 
