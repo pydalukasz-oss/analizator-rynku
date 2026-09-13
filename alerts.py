@@ -1,44 +1,47 @@
+
 """
-Wysyłka sygnałów jako wiadomości na Telegram przez Telegram Bot API.
-Wymaga TELEGRAM_BOT_TOKEN i TELEGRAM_CHAT_ID ustawionych w zmiennych
-środowiskowych (patrz komentarz w config.py, jak je zdobyć).
+Wysyłka sygnałów mailem przez SMTP (domyślnie skonfigurowane pod Gmail).
+Wymaga EMAIL_ADDRESS, EMAIL_PASSWORD (hasło aplikacji!) i EMAIL_TO
+ustawionych w zmiennych środowiskowych — patrz komentarz w config.py.
 """
 
-import requests
+import smtplib
+from email.mime.text import MIMEText
+
 import config
 
 
-def send_telegram_message(text: str) -> bool:
-    """Wysyła pojedynczą wiadomość tekstową na Telegram. Zwraca True/False."""
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
-        print("[Telegram] Brak TELEGRAM_BOT_TOKEN lub TELEGRAM_CHAT_ID — pomijam wysyłkę.")
+def send_email(subject: str, body: str) -> bool:
+    """Wysyła pojedynczego maila. Zwraca True/False."""
+    if not config.EMAIL_ADDRESS or not config.EMAIL_PASSWORD or not config.EMAIL_TO:
+        print("[Email] Brak EMAIL_ADDRESS/EMAIL_PASSWORD/EMAIL_TO — pomijam wysyłkę.")
         return False
 
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": config.TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-    }
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = config.EMAIL_ADDRESS
+    msg["To"] = config.EMAIL_TO
+
     try:
-        resp = requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
+        with smtplib.SMTP(config.EMAIL_SMTP_HOST, config.EMAIL_SMTP_PORT) as server:
+            server.starttls()
+            server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)
+            server.sendmail(config.EMAIL_ADDRESS, [config.EMAIL_TO], msg.as_string())
         return True
     except Exception as e:
-        print(f"[Telegram] Błąd wysyłki: {e}")
+        print(f"[Email] Błąd wysyłki: {e}")
         return False
 
 
 def send_signals(signals: list[dict]):
-    """Wysyła listę sygnałów jako jedną zbiorczą wiadomość (żeby nie zalać czatu)."""
+    """Wysyła listę sygnałów jako jednego zbiorczego maila."""
     if not signals:
         return
 
-    lines = ["<b>📊 Nowe sygnały rynkowe</b>", ""]
-    for s in signals:
-        lines.append(f"• {s['message']}")
+    lines = [f"• {s['message']}" for s in signals]
+    body = "Nowe sygnały rynkowe:\n\n" + "\n".join(lines)
+    subject = f"📊 Analizator rynków — {len(signals)} nowych sygnałów"
 
-    text = "\n".join(lines)
-    ok = send_telegram_message(text)
+    ok = send_email(subject, body)
     if ok:
-        print(f"[Telegram] Wysłano {len(signals)} sygnałów.")
+        print(f"[Email] Wysłano {len(signals)} sygnałów.")
