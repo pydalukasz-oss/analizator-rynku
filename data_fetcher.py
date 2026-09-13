@@ -10,6 +10,8 @@ import requests
 import pandas as pd
 import yfinance as yf
 
+import config
+
 # Wiele darmowych API blokuje domyślny User-Agent biblioteki requests
 # (rozpoznaje go jako bota). Udajemy zwykłą przeglądarkę.
 HEADERS = {
@@ -36,6 +38,13 @@ def fetch_gpw(ticker: str, days: int = 120) -> pd.DataFrame:
         df = df.rename(columns={"data": "date", "otwarcie": "open",
                                  "najwyzszy": "high", "najnizszy": "low",
                                  "zamkniecie": "close", "wolumen": "volume"})
+        if "date" not in df.columns:
+            # Stooq czasem zwraca stronę błędu/limitu zamiast CSV z danymi —
+            # wtedy kolumny są inne niż oczekiwane. Pokazujemy surową
+            # odpowiedź, żeby było wiadomo co faktycznie przyszło.
+            print(f"[GPW] {ticker}: nieoczekiwana odpowiedź (brak kolumny 'date'). "
+                  f"Kolumny: {list(df.columns)}. Początek odpowiedzi: {resp.text[:200]!r}")
+            return pd.DataFrame()
         df["date"] = pd.to_datetime(df["date"])
         df["ticker"] = ticker.upper()
         df["market"] = "GPW"
@@ -78,8 +87,16 @@ def fetch_crypto(coin_id: str, days: int = 120) -> pd.DataFrame:
     """
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+    headers = dict(HEADERS)
+    if config.COINGECKO_API_KEY:
+        headers["x-cg-demo-api-key"] = config.COINGECKO_API_KEY
     try:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code == 401:
+            print(f"[CRYPTO] {coin_id}: CoinGecko wymaga teraz darmowego klucza API "
+                  f"nawet do podstawowego dostępu (zmiana zasad z ich strony). "
+                  f"Pomijam — patrz README, sekcja o kluczu CoinGecko.")
+            return pd.DataFrame()
         resp.raise_for_status()
         raw = resp.json()
         prices = raw.get("prices", [])
@@ -113,7 +130,7 @@ def fetch_all(gpw_tickers, us_tickers, crypto_ids, days: int = 120) -> pd.DataFr
 
     for t in gpw_tickers:
         frames.append(fetch_gpw(t, days))
-        time.sleep(0.3)  # uprzejmość wobec darmowego API
+        time.sleep(1.0)  # uprzejmość wobec darmowego API, zmniejsza ryzyko limitowania
 
     for t in us_tickers:
         frames.append(fetch_us(t, days))

@@ -23,19 +23,35 @@ from data_fetcher import fetch_all
 
 
 def save_to_db(df: pd.DataFrame, db_path: str):
-    conn = sqlite3.connect(db_path)
     df_to_save = df.copy()
     df_to_save["date"] = df_to_save["date"].astype(str)
+
+    # WAŻNE: sprawdzamy istnienie pliku PRZED otwarciem połączenia —
+    # samo sqlite3.connect() tworzy pusty plik, więc sprawdzenie "po"
+    # zawsze zwracałoby True, nawet dla świeżo utworzonej, pustej bazy.
+    file_exists = Path(db_path).exists()
+
+    conn = sqlite3.connect(db_path)
 
     # Jeśli baza już istnieje i ma dane — dociągamy, usuwając ewentualne
     # duplikaty (ten sam ticker + data), żeby nie liczyć wskaźników
     # dwa razy na tych samych dniach.
-    if Path(db_path).exists():
-        existing = pd.read_sql("SELECT * FROM market_data", conn)
-        combined = pd.concat([existing, df_to_save], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["ticker", "date"])
-        combined.to_sql("market_data", conn, if_exists="replace", index=False)
-        print(f"Baza istniała — po scaleniu: {len(combined)} wierszy (usunięto duplikaty).")
+    if file_exists:
+        try:
+            existing = pd.read_sql("SELECT * FROM market_data", conn)
+        except Exception:
+            # Plik istniał, ale bez tabeli market_data (np. pusty plik) —
+            # traktujemy jak brak istniejących danych.
+            existing = pd.DataFrame()
+
+        if not existing.empty:
+            combined = pd.concat([existing, df_to_save], ignore_index=True)
+            combined = combined.drop_duplicates(subset=["ticker", "date"])
+            combined.to_sql("market_data", conn, if_exists="replace", index=False)
+            print(f"Baza istniała — po scaleniu: {len(combined)} wierszy (usunięto duplikaty).")
+        else:
+            df_to_save.to_sql("market_data", conn, if_exists="replace", index=False)
+            print(f"Utworzono nową bazę: {len(df_to_save)} wierszy.")
     else:
         df_to_save.to_sql("market_data", conn, if_exists="replace", index=False)
         print(f"Utworzono nową bazę: {len(df_to_save)} wierszy.")

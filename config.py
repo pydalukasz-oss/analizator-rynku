@@ -50,3 +50,11 @@ EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "")      # np. twoj.mail@gmail.com
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")    # hasło aplikacji, nie zwykłe hasło
 EMAIL_TO = os.environ.get("EMAIL_TO", "")                # gdzie wysyłać alerty (może być ten sam adres)
+
+# --- CoinGecko API (opcjonalny klucz) ---
+# CoinGecko wymaga teraz darmowego klucza "Demo API" nawet do podstawowego
+# dostępu. Załóż darmowe konto na https://www.coingecko.com/en/api/pricing
+# (plan "Demo"), skopiuj klucz i ustaw jako zmienną środowiskową
+# COINGECKO_API_KEY. Bez klucza dane krypto po prostu się pomijają —
+# reszta narzędzia (GPW, USA) działa normalnie.
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "")
