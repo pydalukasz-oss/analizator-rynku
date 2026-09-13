@@ -69,6 +69,12 @@ def fetch_us(ticker: str, days: int = 120) -> pd.DataFrame:
         data = data.reset_index()
         data.columns = [c.lower() for c in data.columns]
         data = data.rename(columns={"date": "date"})
+        # Yahoo Finance zwraca daty ze strefą czasową (np. America/New_York),
+        # a pozostałe źródła (Stooq, CoinGecko) — bez strefy. Ujednolicamy
+        # do "naiwnych" dat, inaczej mieszanie danych z różnych rynków
+        # wywala pd.to_datetime błędem "Mixed timezones detected".
+        if isinstance(data["date"].dtype, pd.DatetimeTZDtype):
+            data["date"] = data["date"].dt.tz_localize(None)
         data["ticker"] = ticker.upper()
         data["market"] = "US"
         return data[["date", "open", "high", "low", "close", "volume", "ticker", "market"]]
